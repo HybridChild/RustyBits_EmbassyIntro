@@ -1,16 +1,19 @@
 #![no_std]
 #![no_main]
 
+use core::sync::atomic::{AtomicU32, Ordering};
+
 use defmt::*;
+use {defmt_rtt as _, panic_probe as _};
 use embassy_executor::Spawner;
+use embassy_stm32::exti::ExtiInput;
 use embassy_stm32::adc::{Adc, SampleTime, Resolution};
-use embassy_stm32::gpio::{Level, Output, Speed};
+use embassy_stm32::gpio::{Level, Output, Pull, Speed};
 use embassy_stm32::{bind_interrupts, Config};
 use embassy_stm32::peripherals::ADC1;
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_time::Timer;
-use {defmt_rtt as _, panic_probe as _};
 
 bind_interrupts!(struct Irqs {
     ADC1_COMP => embassy_stm32::adc::InterruptHandler<ADC1>;
@@ -19,8 +22,12 @@ bind_interrupts!(struct Irqs {
 // Shared ADC wrapped in a mutex for safe concurrent access
 type SharedAdc = Mutex<ThreadModeRawMutex, Option<Adc<'static, ADC1>>>;
 
+const INITIAL_BLINK_MS: u32 = 1000;
+
 // Global static ADC instance
 static SHARED_ADC: SharedAdc = Mutex::new(None);
+// Global variable for the blink time
+static BLINK_MS: AtomicU32 = AtomicU32::new(INITIAL_BLINK_MS);
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
@@ -33,23 +40,27 @@ async fn main(spawner: Spawner) {
 
     // Initialize ADC
     let mut adc = Adc::new(p.ADC1, Irqs);
-    
+
     // Set sampling time (must be >= 4µs for temperature sensor per datasheet)
     adc.set_sample_time(SampleTime::CYCLES239_5);
     adc.set_resolution(Resolution::BITS12);
-    
+
     info!("ADC initialized with 239.5 cycle sampling time");
 
     // Enable temperature sensor and voltage reference
     let temp_channel = adc.enable_temperature();
     let vref_channel = adc.enable_vref();
-    
+
     // Store ADC in the global static
     *SHARED_ADC.lock().await = Some(adc);
-    
+
     // Initialize LED on PA5
     let led = Output::new(p.PA5, Level::Low, Speed::Low);
     info!("LED configured on PA5");
+
+    // Configure the button pin and obtain handler.
+    // On the Nucleo F091RC there is a button connected to pin PC13.
+    let button = ExtiInput::new(p.PC13, p.EXTI13, Pull::None);
 
     // Read and display factory calibration values once at startup
     let (temp30_cal, temp110_cal, vrefint_cal) = read_factory_calibration();
@@ -58,16 +69,40 @@ async fn main(spawner: Spawner) {
     info!("  TEMP110_CAL: {} (ADC value at 110°C)", temp110_cal);
     info!("  VREFINT_CAL: {} (VREFINT at 3.3V)", vrefint_cal);
 
+    spawner.spawn(button_task(button)).unwrap();
+
     // Spawn the LED blinking task
     spawner.spawn(blink_task(led)).unwrap();
-    
+
     // Spawn the temperature monitoring task
     spawner.spawn(temperature_task(temp_channel, vref_channel)).unwrap();
-    
+
     // Main task can do other work or just wait
     loop {
         Timer::after_millis(10000).await;
-        info!("Main task heartbeat - both tasks running independently");
+        info!("Main task heartbeat - all tasks running independently");
+    }
+}
+
+#[embassy_executor::task]
+async fn button_task(mut button: ExtiInput<'static>) {
+    // Create and initialize a delay variable to manage delay loop
+    let mut blink_ms = INITIAL_BLINK_MS;
+
+    loop {
+        // Check if button got pressed
+        button.wait_for_falling_edge().await;
+
+        blink_ms >>= 1;
+        // If updated delay value drops below 50ms then reset it back to starting value
+        if blink_ms < 50 {
+            blink_ms = INITIAL_BLINK_MS;
+        }
+        // Updated delay value to global context
+        BLINK_MS.store(blink_ms, Ordering::Relaxed);
+
+        info!("Button pressed");
+        Timer::after_millis(100).await;
     }
 }
 
@@ -76,14 +111,16 @@ async fn blink_task(mut led: Output<'static>) {
     let mut blink_counter = 0;
 
     loop {
+        let blink_ms = BLINK_MS.load(Ordering::Relaxed);
+
         // Blink LED
         led.set_high();
-        Timer::after_millis(400).await;
+        Timer::after_millis(blink_ms as u64).await;
         led.set_low();
-        Timer::after_millis(400).await;
-        
+        Timer::after_millis(blink_ms as u64).await;
+
         blink_counter += 1;
-        
+
         // Log blink status less frequently to avoid spam
         if blink_counter % 10 == 0 {
             info!("LED blinked {} times", blink_counter);
@@ -138,12 +175,12 @@ fn read_factory_calibration() -> (u16, u16, u16) {
     const TEMP30_CAL_ADDR: *const u16 = 0x1FFF_F7B8 as *const u16;
     const TEMP110_CAL_ADDR: *const u16 = 0x1FFF_F7C2 as *const u16;
     const VREFINT_CAL_ADDR: *const u16 = 0x1FFF_F7BA as *const u16;
-    
+
     unsafe {
         let temp30_cal = core::ptr::read_volatile(TEMP30_CAL_ADDR);
         let temp110_cal = core::ptr::read_volatile(TEMP110_CAL_ADDR);
         let vrefint_cal = core::ptr::read_volatile(VREFINT_CAL_ADDR);
-        
+
         (temp30_cal, temp110_cal, vrefint_cal)
     }
 }
@@ -151,16 +188,16 @@ fn read_factory_calibration() -> (u16, u16, u16) {
 fn calculate_temperature(temp_sample: u16, vref_sample: u16) -> f32 {
     // Read factory calibration values from flash
     let (temp30_cal, temp110_cal, vrefint_cal) = read_factory_calibration();
-    
+
     // VDD voltage during factory calibration (always 3.3V)
     const VDDA_CALIB_MV: u32 = 3300;
-    
+
     // Calculate actual VDD voltage using factory VREFINT calibration
     let vdda_actual = (VDDA_CALIB_MV * vrefint_cal as u32) / vref_sample as u32;
-    
+
     // Compensate temperature reading for actual VDD voltage
     let temp_compensated = (temp_sample as u32 * vdda_actual) / VDDA_CALIB_MV;
-    
+
     // Calculate temperature using factory calibration and linear interpolation
     // Formula from STM32F072 reference manual
     30.0 + ((temp_compensated as f32 - temp30_cal as f32) * (110.0 - 30.0)) / (temp110_cal as f32 - temp30_cal as f32)
