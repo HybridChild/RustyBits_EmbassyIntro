@@ -10,4 +10,12 @@ target = "thumbv6m-none-eabi"
 # Use flip-link to detect stack overflows during development
 rustflags = [
   "-C", "link-arg=-Tlink.x",
+  "-C", "link-arg=-Tdefmt.x",
 ]
+
+# tip: run `cargo clean` after changing these values
+[env]
+# default = "error"; other options: trace, debug, warn or off
+# to set by module: "warn,{crate}::{mod}=trace"
+DEFMT_LOG = "info"
+DEFMT_RTT_BUFFER_SIZE = "1024"
