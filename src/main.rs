@@ -7,6 +7,8 @@ use embassy_stm32::adc::{Adc, SampleTime, Resolution};
 use embassy_stm32::gpio::{Level, Output, Speed};
 use embassy_stm32::{bind_interrupts, Config};
 use embassy_stm32::peripherals::ADC1;
+use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
+use embassy_sync::mutex::Mutex;
 use embassy_time::Timer;
 use {defmt_rtt as _, panic_probe as _};
 
@@ -14,9 +16,15 @@ bind_interrupts!(struct Irqs {
     ADC1_COMP => embassy_stm32::adc::InterruptHandler<ADC1>;
 });
 
+// Shared ADC wrapped in a mutex for safe concurrent access
+type SharedAdc = Mutex<ThreadModeRawMutex, Option<Adc<'static, ADC1>>>;
+
+// Global static ADC instance
+static SHARED_ADC: SharedAdc = Mutex::new(None);
+
 #[embassy_executor::main]
-async fn main(_spawner: Spawner) {
-    info!("Starting Embassy temperature sensor example");
+async fn main(spawner: Spawner) {
+    info!("Starting Embassy temperature sensor example with separate tasks");
 
     // Initialize the microcontroller
     let p = embassy_stm32::init(Config::default());
@@ -33,13 +41,15 @@ async fn main(_spawner: Spawner) {
     info!("ADC initialized with 239.5 cycle sampling time");
 
     // Enable temperature sensor and voltage reference
-    let mut temp_channel = adc.enable_temperature();
-    let mut vref_channel = adc.enable_vref();
+    let temp_channel = adc.enable_temperature();
+    let vref_channel = adc.enable_vref();
+    
+    // Store ADC in the global static
+    *SHARED_ADC.lock().await = Some(adc);
     
     // Initialize LED on PA5
-    let mut led = Output::new(p.PA5, Level::Low, Speed::Low);
+    let led = Output::new(p.PA5, Level::Low, Speed::Low);
     info!("LED configured on PA5");
-    let mut blink_counter = 0;
 
     // Read and display factory calibration values once at startup
     let (temp30_cal, temp110_cal, vrefint_cal) = read_factory_calibration();
@@ -48,17 +58,24 @@ async fn main(_spawner: Spawner) {
     info!("  TEMP110_CAL: {} (ADC value at 110°C)", temp110_cal);
     info!("  VREFINT_CAL: {} (VREFINT at 3.3V)", vrefint_cal);
 
+    // Spawn the LED blinking task
+    spawner.spawn(blink_task(led)).unwrap();
+    
+    // Spawn the temperature monitoring task
+    spawner.spawn(temperature_task(temp_channel, vref_channel)).unwrap();
+    
+    // Main task can do other work or just wait
     loop {
-        // Read voltage reference to calculate actual VDD
-        let vref_sample = adc.read(&mut vref_channel).await;
-        
-        // Read temperature sensor
-        let temp_sample = adc.read(&mut temp_channel).await;
-        
-        // Calculate temperature using the calibration formula
-        // Using factory calibration values from the STM32F072 datasheet
-        let temp_celsius = calculate_temperature(temp_sample, vref_sample);
-        
+        Timer::after_millis(10000).await;
+        info!("Main task heartbeat - both tasks running independently");
+    }
+}
+
+#[embassy_executor::task]
+async fn blink_task(mut led: Output<'static>) {
+    let mut blink_counter = 0;
+
+    loop {
         // Blink LED
         led.set_high();
         Timer::after_millis(400).await;
@@ -66,15 +83,52 @@ async fn main(_spawner: Spawner) {
         Timer::after_millis(400).await;
         
         blink_counter += 1;
+        
+        // Log blink status less frequently to avoid spam
+        if blink_counter % 10 == 0 {
+            info!("LED blinked {} times", blink_counter);
+        }
+    }
+}
+
+#[embassy_executor::task]
+async fn temperature_task(
+    mut temp_channel: embassy_stm32::adc::Temperature,
+    mut vref_channel: embassy_stm32::adc::Vref,
+) {
+    let mut reading_counter = 0;
+
+    loop {
+        // Wait longer between temperature readings since they don't need to be as frequent
+        Timer::after_millis(3000).await;
+
+        let (vref_sample, temp_sample) = {
+            // Lock the global ADC mutex for the duration of both readings
+            let mut adc_guard = SHARED_ADC.lock().await;
+            let adc = adc_guard.as_mut().unwrap();
+
+            // Read voltage reference to calculate actual VDD
+            let vref_sample = adc.read(&mut vref_channel).await;
+
+            // Read temperature sensor
+            let temp_sample = adc.read(&mut temp_channel).await;
+
+            (vref_sample, temp_sample)
+        }; // ADC mutex is automatically released here
+
+        // Calculate temperature using the calibration formula
+        let temp_celsius = calculate_temperature(temp_sample, vref_sample);
+
+        reading_counter += 1;
 
         // Convert to tenths for integer display
         let temp_tenths = (temp_celsius * 10.0) as i32;
-        
+
         info!(
-            "Blink: {}, Temperature: {}.{}°C", 
-            blink_counter, 
+            "Reading #{}: Temperature: {}.{}°C", 
+            reading_counter,
             temp_tenths / 10,
-            temp_tenths % 10
+            temp_tenths % 10,
         );
     }
 }
