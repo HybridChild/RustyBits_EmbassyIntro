@@ -1,6 +1,10 @@
 [target.thumbv6m-none-eabi]
 # Use probe-rs for running/flashing
-runner = "probe-rs run --chip STM32F072RB"
+runner = [
+  "probe-rs", "run",
+  "--chip", "STM32F072RB",
+  "--log-format", "{t} {L} {s}",
+]
 
 [build]
 # Set the default target
@@ -15,7 +19,7 @@ rustflags = [
 
 # tip: run `cargo clean` after changing these values
 [env]
-# default = "error"; other options: trace, debug, warn or off
+# default = "error"; other options: warn, info, debug, trace, off
 # to set by module: "warn,{crate}::{mod}=trace"
-DEFMT_LOG = "info"
+DEFMT_LOG = "debug"
 DEFMT_RTT_BUFFER_SIZE = "1024"
