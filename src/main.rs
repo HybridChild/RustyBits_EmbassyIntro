@@ -19,62 +19,54 @@ bind_interrupts!(struct Irqs {
     ADC1_COMP => embassy_stm32::adc::InterruptHandler<ADC1>;
 });
 
-// Shared ADC wrapped in a mutex for safe concurrent access
-type SharedAdc = Mutex<ThreadModeRawMutex, Option<Adc<'static, ADC1>>>;
 
 const INITIAL_BLINK_MS: u32 = 1000;
-
-// Global static ADC instance
-static SHARED_ADC: SharedAdc = Mutex::new(None);
 // Global variable for the blink time
 static BLINK_MS: AtomicU32 = AtomicU32::new(INITIAL_BLINK_MS);
 
+// Shared ADC wrapped in a mutex for safe concurrent access
+type SharedAdc = Mutex<ThreadModeRawMutex, Option<Adc<'static, ADC1>>>;
+// Global static ADC instance
+static SHARED_ADC: SharedAdc = Mutex::new(None);
+
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
-    info!("Starting Embassy temperature sensor example with separate tasks");
+    info!("Start running main executor");
 
     // Initialize the microcontroller
     let p = embassy_stm32::init(Config::default());
-    
     info!("Peripherals initialized");
 
     // Initialize ADC
     let mut adc = Adc::new(p.ADC1, Irqs);
-
     // Set sampling time (must be >= 4µs for temperature sensor per datasheet)
     adc.set_sample_time(SampleTime::CYCLES239_5);
     adc.set_resolution(Resolution::BITS12);
-
-    info!("ADC initialized with 239.5 cycle sampling time");
-
     // Enable temperature sensor and voltage reference
     let temp_channel = adc.enable_temperature();
     let vref_channel = adc.enable_vref();
-
     // Store ADC in the global static
     *SHARED_ADC.lock().await = Some(adc);
+    info!("ADC initialized with 239.5 cycle sampling time");
+    // Read and display factory calibration values once at startup
+    let (temp30_cal, temp110_cal, vrefint_cal) = read_factory_calibration();
+    info!("Read factory calibration values:");
+    info!("  TEMP30_CAL: {} (ADC value at 30°C)", temp30_cal);
+    info!("  TEMP110_CAL: {} (ADC value at 110°C)", temp110_cal);
+    info!("  VREFINT_CAL: {} (VREFINT at 3.3V)", vrefint_cal);
 
     // Initialize LED on PA5
     let led = Output::new(p.PA5, Level::Low, Speed::Low);
     info!("LED configured on PA5");
 
     // Configure the button pin and obtain handler.
-    // On the Nucleo F091RC there is a button connected to pin PC13.
+    // On the NUCLEO-F072RB there is a button connected to pin PC13.
     let button = ExtiInput::new(p.PC13, p.EXTI13, Pull::None);
+    info!("Button configured on PC13");
 
-    // Read and display factory calibration values once at startup
-    let (temp30_cal, temp110_cal, vrefint_cal) = read_factory_calibration();
-    info!("Factory calibration values:");
-    info!("  TEMP30_CAL: {} (ADC value at 30°C)", temp30_cal);
-    info!("  TEMP110_CAL: {} (ADC value at 110°C)", temp110_cal);
-    info!("  VREFINT_CAL: {} (VREFINT at 3.3V)", vrefint_cal);
-
+    // Spawn tasks
     spawner.spawn(button_task(button)).unwrap();
-
-    // Spawn the LED blinking task
     spawner.spawn(blink_task(led)).unwrap();
-
-    // Spawn the temperature monitoring task
     spawner.spawn(temperature_task(temp_channel, vref_channel)).unwrap();
 
     // Main task can do other work or just wait
@@ -101,8 +93,8 @@ async fn button_task(mut button: ExtiInput<'static>) {
         // Updated delay value to global context
         BLINK_MS.store(blink_ms, Ordering::Relaxed);
 
-        info!("Button pressed");
-        Timer::after_millis(100).await;
+        info!("Button pressed - Blink speed set to {}ms", blink_ms);
+        Timer::after_millis(100).await;  // Debounce delay
     }
 }
 
@@ -136,8 +128,8 @@ async fn temperature_task(
     let mut reading_counter = 0;
 
     loop {
-        // Wait longer between temperature readings since they don't need to be as frequent
-        Timer::after_millis(3000).await;
+        // Temperature readings don't need to be as frequent
+        Timer::after_millis(4000).await;
 
         let (vref_sample, temp_sample) = {
             // Lock the global ADC mutex for the duration of both readings
