@@ -1,8 +1,6 @@
 #![no_std]
 #![no_main]
 
-use core::sync::atomic::{AtomicU32, Ordering};
-
 use defmt::*;
 use {defmt_rtt as _, panic_probe as _};
 use embassy_executor::Spawner;
@@ -13,16 +11,19 @@ use embassy_stm32::{bind_interrupts, Config};
 use embassy_stm32::peripherals::ADC1;
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::mutex::Mutex;
-use embassy_time::Timer;
+use embassy_sync::signal::Signal;
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_time::{Duration, Timer, WithTimeout};
 
 bind_interrupts!(struct Irqs {
     ADC1_COMP => embassy_stm32::adc::InterruptHandler<ADC1>;
 });
 
+enum ButtonEvent {
+    Pressed,
+}
 
-const INITIAL_BLINK_MS: u32 = 1000;
-// Global variable for the blink time
-static BLINK_MS: AtomicU32 = AtomicU32::new(INITIAL_BLINK_MS);
+static BUTTON_SIGNAL: Signal<CriticalSectionRawMutex, ButtonEvent> = Signal::new();
 
 // Shared ADC wrapped in a mutex for safe concurrent access
 type SharedAdc = Mutex<ThreadModeRawMutex, Option<Adc<'static, ADC1>>>;
@@ -78,44 +79,46 @@ async fn main(spawner: Spawner) {
 
 #[embassy_executor::task]
 async fn button_task(mut button: ExtiInput<'static>) {
-    // Create and initialize a delay variable to manage delay loop
-    let mut blink_ms = INITIAL_BLINK_MS;
 
     loop {
         // Check if button got pressed
         button.wait_for_falling_edge().await;
-
-        blink_ms >>= 1;
-        // If updated delay value drops below 50ms then reset it back to starting value
-        if blink_ms < 50 {
-            blink_ms = INITIAL_BLINK_MS;
-        }
-        // Updated delay value to global context
-        BLINK_MS.store(blink_ms, Ordering::Relaxed);
-
-        info!("Button pressed - Blink speed set to {}ms", blink_ms);
-        Timer::after_millis(100).await;  // Debounce delay
+        BUTTON_SIGNAL.signal(ButtonEvent::Pressed);
+        info!("Button pressed...");
     }
 }
 
 #[embassy_executor::task]
 async fn blink_task(mut led: Output<'static>) {
+    const INITIAL_BLINK_MS: u32 = 1000;
+    let mut blink_ms = INITIAL_BLINK_MS;
     let mut blink_counter = 0;
+    let mut next_level = Level::High;
 
     loop {
-        let blink_ms = BLINK_MS.load(Ordering::Relaxed);
+        let delay = Duration::from_millis(blink_ms as u64);
 
+        if let Ok(_event) = BUTTON_SIGNAL.wait().with_timeout(delay).await {
+            next_level = Level::High;
+            blink_ms >>= 1;
+            // If updated delay value drops below 50ms then reset it back to starting value
+            if blink_ms < 50 {
+                blink_ms = INITIAL_BLINK_MS;
+            }
+            info!("Blink speed set to {}ms", blink_ms);
+        }
         // Blink LED
-        led.set_high();
-        Timer::after_millis(blink_ms as u64).await;
-        led.set_low();
-        Timer::after_millis(blink_ms as u64).await;
-
-        blink_counter += 1;
-
-        // Log blink status less frequently to avoid spam
-        if blink_counter % 10 == 0 {
-            info!("LED blinked {} times", blink_counter);
+        led.set_level(next_level);
+        
+        if next_level == Level::High {
+            next_level = Level::Low;
+            blink_counter += 1;
+            // Log blink status less frequently to avoid spam
+            if blink_counter % 10 == 0 {
+                info!("LED blinked {} times", blink_counter);
+            }
+        } else {
+            next_level = Level::High;
         }
     }
 }
