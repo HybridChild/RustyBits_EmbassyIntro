@@ -16,7 +16,7 @@ use embassy_time::Timer;
 use RustyBits_EmbassyIntro::config::MAIN_HEARTBEAT_INTERVAL_MS;
 use RustyBits_EmbassyIntro::shared::SHARED_ADC;
 use RustyBits_EmbassyIntro::tasks::{button_task, blink_task, mcu_temp_task};
-use RustyBits_EmbassyIntro::drivers::mcu_temp::read_factory_calibration;
+use RustyBits_EmbassyIntro::config::get_mcu_temp_factory_calibration;
 
 bind_interrupts!(struct Irqs {
     ADC1_COMP => embassy_stm32::adc::InterruptHandler<ADC1>;
@@ -70,12 +70,12 @@ async fn initialize_adc(adc_peripheral: ADC1) -> Adc<'static, ADC1> {
 
 /// Display factory calibration values at startup
 fn display_factory_calibration() {
-    let (temp30_cal, temp110_cal, vrefint_cal) = read_factory_calibration();
+    let factory_calibraion = get_mcu_temp_factory_calibration();
     
     info!("Factory calibration values:");
-    info!("  TEMP30_CAL: {} (ADC value at 30°C)", temp30_cal);
-    info!("  TEMP110_CAL: {} (ADC value at 110°C)", temp110_cal);
-    info!("  VREFINT_CAL: {} (VREFINT at 3.3V)", vrefint_cal);
+    info!("  TEMP30_CAL: {} (ADC value at 30°C)", factory_calibraion.temp30_cal);
+    info!("  TEMP110_CAL: {} (ADC value at 110°C)", factory_calibraion.temp110_cal);
+    info!("  VREFINT_CAL: {} (VREFINT at 3.3V)", factory_calibraion.vrefint_cal);
 }
 
 /// Spawn all application tasks
