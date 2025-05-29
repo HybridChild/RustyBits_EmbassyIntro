@@ -3,21 +3,6 @@
 version = 4
 
 [[package]]
-name = "RustyBits_EmbassyIntro"
-version = "0.1.0"
-dependencies = [
- "cortex-m",
- "cortex-m-rt",
- "defmt 1.0.1",
- "defmt-rtt",
- "embassy-executor",
- "embassy-stm32",
- "embassy-sync",
- "embassy-time",
- "panic-probe",
-]
-
-[[package]]
 name = "aligned"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -663,6 +648,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "138e3e0acb6c9fb258b19b67cb8abd63c00679d2851805ea151465464fe9030a"
 dependencies = [
  "semver",
+]
+
+[[package]]
+name = "rusty_bits_embassy_intro"
+version = "0.1.0"
+dependencies = [
+ "cortex-m",
+ "cortex-m-rt",
+ "defmt 1.0.1",
+ "defmt-rtt",
+ "embassy-executor",
+ "embassy-stm32",
+ "embassy-sync",
+ "embassy-time",
+ "panic-probe",
 ]
 
 [[package]]

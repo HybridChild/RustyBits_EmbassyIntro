@@ -13,10 +13,10 @@ use embassy_stm32::peripherals::ADC1;
 use embassy_time::Timer;
 
 // Import our modules
-use RustyBits_EmbassyIntro::config::MAIN_HEARTBEAT_INTERVAL_MS;
-use RustyBits_EmbassyIntro::shared::SHARED_ADC;
-use RustyBits_EmbassyIntro::tasks::{button_task, blink_task, mcu_temp_task};
-use RustyBits_EmbassyIntro::config::get_mcu_temp_factory_calibration;
+use rusty_bits_embassy_intro::config::MAIN_HEARTBEAT_INTERVAL_MS;
+use rusty_bits_embassy_intro::shared::SHARED_ADC;
+use rusty_bits_embassy_intro::tasks::{button_task, blink_task, mcu_temp_task};
+use rusty_bits_embassy_intro::config::get_mcu_temp_factory_calibration;
 
 bind_interrupts!(struct Irqs {
     ADC1_COMP => embassy_stm32::adc::InterruptHandler<ADC1>;

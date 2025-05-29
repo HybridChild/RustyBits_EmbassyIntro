@@ -1,5 +1,5 @@
 [package]
-name = "RustyBits_EmbassyIntro"
+name = "rusty_bits_embassy_intro"
 version = "0.1.0"
 edition = "2024"
 
@@ -15,7 +15,7 @@ embassy-time = { version = "0.4.0", features = ["defmt", "defmt-timestamp-uptime
 panic-probe = { version = "1.0.0", features = ["print-defmt"] }
 
 [[bin]]
-name = "RustyBits_EmbassyIntro"
+name = "rusty_bits_embassy_intro"
 test = false
 bench = false
 
