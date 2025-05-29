@@ -31,7 +31,7 @@ async fn main(spawner: Spawner) {
     info!("Peripherals initialized");
 
     // Initialize ADC
-    let adc = initialize_adc(p.ADC1).await;
+    let adc = initialize_adc(p.ADC1);
     let mcu_temp_channel = adc.enable_temperature();
     let vref_channel = adc.enable_vref();
 
@@ -57,7 +57,7 @@ async fn main(spawner: Spawner) {
 }
 
 /// Initialize ADC with proper settings for temperature sensor
-async fn initialize_adc(adc_peripheral: ADC1) -> Adc<'static, ADC1> {
+fn initialize_adc(adc_peripheral: ADC1) -> Adc<'static, ADC1> {
     let mut adc = Adc::new(adc_peripheral, Irqs);
 
     // Set sampling time (must be >= 4µs for temperature sensor per datasheet)
