@@ -16,8 +16,6 @@ pub async fn mcu_temp_task(
 ) {
     info!("Temperature task started");
 
-    let mut reading_counter = 0;
-
     loop {
         // Temperature readings don't need to be as frequent
         Timer::after_millis(MCU_TEMP_READING_INTERVAL_MS).await;
@@ -39,14 +37,11 @@ pub async fn mcu_temp_task(
         // Calculate temperature using the calibration formula
         let temp_celsius = calculate_temperature(temp_sample, vref_sample);
 
-        reading_counter += 1;
-
         // Convert to tenths for integer display
         let temp_tenths = (temp_celsius * 10.0) as i32;
 
         info!(
-            "Reading #{}: Temperature: {}.{}°C", 
-            reading_counter,
+            "MCU Temperature: {}.{}°C",
             temp_tenths / 10,
             temp_tenths % 10,
         );

@@ -2,6 +2,7 @@
 # Use probe-rs for running/flashing
 runner = [
   "probe-rs", "run",
+  "--probe", "0483:374b",  # Select STLink by VID:PID
   "--chip", "STM32F072RB",
   "--log-format", "{t} {L} {s}",
 ]

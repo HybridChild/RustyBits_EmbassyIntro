@@ -15,6 +15,9 @@ pub const MAIN_HEARTBEAT_INTERVAL_MS: u64 = 10000;
 /// How often to log blink counter (every N blinks)
 pub const BLINK_LOG_FREQUENCY: u32 = 10;
 
+/// SHT31 sensor reading interval in milliseconds
+pub const SHT31_READING_INTERVAL_MS: u64 = 5000;
+
 /// Temperature reading interval in milliseconds
 pub const MCU_TEMP_READING_INTERVAL_MS: u64 = 4000;
 
