@@ -18,6 +18,9 @@ pub const BLINK_LOG_FREQUENCY: u32 = 10;
 /// Temperature reading interval in milliseconds
 pub const MCU_TEMP_READING_INTERVAL_MS: u64 = 4000;
 
+/// SHT31 sensor reading interval in milliseconds
+pub const SHT31_READING_INTERVAL_MS: u64 = 3000;
+
 /// VDD voltage during factory calibration (always 3.3V)
 pub const MCU_VDDA_CALIB_MV: u32 = 3300;
 

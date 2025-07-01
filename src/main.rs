@@ -8,14 +8,17 @@ use embassy_executor::Spawner;
 use embassy_stm32::exti::ExtiInput;
 use embassy_stm32::adc::{Adc, SampleTime, Resolution};
 use embassy_stm32::gpio::{Level, Output, Pull, Speed};
+use embassy_stm32::i2c::{I2c, Config as I2cConfig};
+use embassy_stm32::time::Hertz;
+use embassy_stm32::mode::Blocking;
 use embassy_stm32::{bind_interrupts, Config};
-use embassy_stm32::peripherals::ADC1;
+use embassy_stm32::peripherals::{ADC1, I2C1};
 use embassy_time::Timer;
 
 // Import our modules
 use rusty_bits_embassy_intro::config::MAIN_HEARTBEAT_INTERVAL_MS;
 use rusty_bits_embassy_intro::shared::SHARED_ADC;
-use rusty_bits_embassy_intro::tasks::{button_task, blink_task, mcu_temp_task};
+use rusty_bits_embassy_intro::tasks::{button_task, blink_task, mcu_temp_task, sht31_task};
 use rusty_bits_embassy_intro::config::get_mcu_temp_factory_calibration;
 
 bind_interrupts!(struct Irqs {
@@ -39,6 +42,10 @@ async fn main(spawner: Spawner) {
     *SHARED_ADC.lock().await = Some(adc);
     info!("ADC initialized and stored in global mutex");
 
+    // Initialize I2C for SHT31
+    let i2c = initialize_i2c(p.I2C1, p.PB8, p.PB9);
+    info!("I2C initialized for SHT31");
+
     // Display factory calibration values at startup
     display_factory_calibration();
 
@@ -50,7 +57,7 @@ async fn main(spawner: Spawner) {
     info!("Button configured on PC13");
 
     // Spawn all tasks
-    spawn_tasks(&spawner, button, led, mcu_temp_channel, vref_channel).unwrap();
+    spawn_tasks(&spawner, button, led, mcu_temp_channel, vref_channel, i2c).unwrap();
 
     // Main task heartbeat
     run_main_loop().await;
@@ -66,6 +73,17 @@ fn initialize_adc(adc_peripheral: ADC1) -> Adc<'static, ADC1> {
 
     info!("ADC initialized with 239.5 cycle sampling time");
     adc
+}
+
+/// Initialize I2C with standard 100kHz frequency
+fn initialize_i2c(
+    i2c_peripheral: I2C1,
+    scl_pin: embassy_stm32::peripherals::PB8,
+    sda_pin: embassy_stm32::peripherals::PB9,
+) -> I2c<'static, Blocking> {
+    let i2c_config = I2cConfig::default();
+
+    I2c::new_blocking(i2c_peripheral, scl_pin, sda_pin, Hertz(100_000), i2c_config)
 }
 
 /// Display factory calibration values at startup
@@ -85,10 +103,12 @@ fn spawn_tasks(
     led: Output<'static>,
     temp_channel: embassy_stm32::adc::Temperature,
     vref_channel: embassy_stm32::adc::Vref,
+    i2c: I2c<'static, Blocking>,
 ) -> Result<(), embassy_executor::SpawnError> {
     spawner.spawn(button_task(button))?;
     spawner.spawn(blink_task(led))?;
     spawner.spawn(mcu_temp_task(temp_channel, vref_channel))?;
+    spawner.spawn(sht31_task(i2c))?;
 
     info!("All tasks spawned successfully");
     Ok(())
